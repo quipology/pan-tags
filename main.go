@@ -21,13 +21,12 @@ const tagXPath = "type=config&action=get&xpath=/config/devices/entry[@name='loca
 
 type Tags struct {
 	XMLName xml.Name `xml:"response"`
-	Results Result   `xml:"result"`
-	TagList []Tag    `xml:"tag"`
+	TagList []Tag    `xml:"result>tag"`
 }
 
 type Tag struct {
-	Key string `xml:"entry name,attr"`
-	Value string `xml:"`
+	Key   string `xml:"entry name,attr"`
+	Value string `xml:",chardata"`
 }
 
 func readEnvFile() []byte {
@@ -93,7 +92,6 @@ func main() {
 		fmt.Printf("usage: %v <filename>\n", filepath.Base(os.Args[0]))
 		os.Exit(1)
 	}
-
 	// Get env file data
 	envBytes := readEnvFile()
 
@@ -103,6 +101,7 @@ func main() {
 
 	// Get list of PANs
 	pFWs := getPANs(envBytes)
+
 	// Get tags from provided file
 	tags := getTags(os.Args[1])
 	for _, i := range tags {
@@ -132,15 +131,24 @@ func main() {
 	}
 
 	fmt.Println(string(b))
-	fmt.Println(resp.Status, "-", resp.StatusCode)
 
-	var t Tags
-	err = xml.Unmarshal(b, &t)
-	if err != nil {
-		fmt.Println(err)
+	re := regexp.MustCompile(`entry name="(.+?)"`)
+	r := re.FindAllStringSubmatch(string(b), -1)
+	if len(r) == 0 {
+		fmt.Println("No matches found, exiting..")
 		os.Exit(1)
 	}
+	for _, i := range r {
+		fmt.Println(i[1])
+	}
 
-	fmt.Println(t)
+	// var t Tags
+	// err = xml.Unmarshal(b, &t)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	os.Exit(1)
+	// }
+
+	// fmt.Println(t)
 
 }
