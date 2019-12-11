@@ -16,10 +16,7 @@ import (
 	"strings"
 )
 
-const (
-	envFile  = ".env" // Environment file
-	getXPath = "type=config&action=get&xpath=/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/tag"
-)
+const envFile = ".env" // Environment file
 
 var apiKey string // For storing API key
 
@@ -81,7 +78,7 @@ func getPANs(e []byte) []string {
 	return strings.Split(reResults[1], ",")
 }
 
-func createTag(tag, pan string) {
+func createTag(tag, pan string) bool {
 	tagSetXPath := "type=config&action=set&xpath=/config/shared/tag"
 	// Generate encoded query string
 	encodedQuery := url.QueryEscape(fmt.Sprintf("<entry name='%v'/>", tag))
@@ -99,17 +96,29 @@ func createTag(tag, pan string) {
 		os.Exit(1)
 	}
 	// Execute request
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return
+	fmt.Printf("Attempting to create tag '%v' on %v..\n", tag, pan)
+	counter := 1
+	for counter <= 3 { // # of retries before confirming no connectivity
+		resp, err := client.Do(req)
+		if err != nil {
+			counter++
+			if counter > 3 {
+				counter = 3
+				break
+			}
+			fmt.Printf("Unable to connect to %v, retrying..(attempt #%v)\n", pan, counter)
+			continue
+		}
+		// Read reponse
+		if resp.StatusCode == 200 {
+			fmt.Println(fmt.Sprintf("Tag:'%v' was created successfully.", tag))
+			return true
+		}
+		fmt.Println(fmt.Sprintf("Something went wrong when attempting to add tag:'%v'", tag))
+		return true
 	}
-	// Read reponse
-	if resp.StatusCode == 200 {
-		fmt.Println(fmt.Sprintf("Tag: '%v' was created successfully.\n", tag))
-	} else {
-		fmt.Println(fmt.Sprintf("Something went wrong when attempting to add tag: '%v'\n", tag))
-	}
+	fmt.Printf("Unable to connect to: %v after %v attempts.\n", pan, counter)
+	return false
 }
 
 func main() {
@@ -129,46 +138,15 @@ func main() {
 	// Get tags from provided file
 	tags := getTags(os.Args[1])
 
+OUTER:
 	for _, pan := range pFWs {
 		for _, tag := range tags {
-			createTag(tag, pan)
+			result := createTag(tag, pan)
+			if !result { // If creation of tag fails on PAN devices, move onto next PAN device
+				continue OUTER
+			}
 		}
+		// Commit changes
+
 	}
-
-	// ------------------
-	// GET
-	// ------------------
-	// url := fmt.Sprintf("https://%v/api/?key=%v&%v", pFWs[0], apiKey, getXPath)
-	// fmt.Println(url)
-	// tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	// client := http.Client{Transport: tr}
-	// req, err := http.NewRequest("GET", url, nil)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	os.Exit(1)
-	// }
-	// resp, err := client.Do(req)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	os.Exit(1)
-	// }
-	// b, err := ioutil.ReadAll(resp.Body)
-	// resp.Body.Close()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	os.Exit(1)
-	// }
-
-	// fmt.Println(string(b))
-
-	// re := regexp.MustCompile(`entry name="(.+?)"`)
-	// r := re.FindAllStringSubmatch(string(b), -1)
-	// if len(r) == 0 {
-	// 	fmt.Println("No matches found, exiting..")
-	// 	os.Exit(1)
-	// }
-	// for _, i := range r {
-	// 	fmt.Println(i[1])
-	// }
-
 }
