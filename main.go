@@ -6,28 +6,23 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
-	"encoding/xml"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
-const envFile = ".env"
-const tagXPath = "type=config&action=get&xpath=/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/tag"
+const (
+	envFile  = ".env" // Environment file
+	getXPath = "type=config&action=get&xpath=/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/tag"
+)
 
-type Tags struct {
-	XMLName xml.Name `xml:"response"`
-	TagList []Tag    `xml:"result>tag"`
-}
-
-type Tag struct {
-	Key   string `xml:"entry name,attr"`
-	Value string `xml:",chardata"`
-}
+var apiKey string // For storing API key
 
 func readEnvFile() []byte {
 	// Get absoulute path of program
@@ -38,8 +33,14 @@ func readEnvFile() []byte {
 	}
 	// Get base directory of program
 	base := filepath.Dir(abs)
+	switch runtime.GOOS {
+	case "linux", "darwin", "freebsd":
+		base = base + "/"
+	case "windows":
+		base = base + "\\"
+	}
 	// Read env file
-	envBytes, err := ioutil.ReadFile(base + "/" + envFile)
+	envBytes, err := ioutil.ReadFile(base + envFile)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -87,6 +88,37 @@ func getPANs(e []byte) []string {
 	return strings.Split(reResults[1], ",")
 }
 
+func createTag(tag, pan string) {
+	tagSetXPath := "type=config&action=set&xpath=/config/shared/tag"
+	// Generate encoded query string
+	encodedQuery := url.QueryEscape(fmt.Sprintf("<entry name='%v'/>", tag))
+	encodedQuery = strings.Replace(encodedQuery, "%26", "%26amp;", -1)
+	// URL
+	url := fmt.Sprintf("https://%v/api/?key=%v&%v&element=%v", pan, apiKey, tagSetXPath, encodedQuery)
+	// Create HTTP transport
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// Create HTTP client
+	client := http.Client{Transport: tr}
+	// Generate GET request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Read reponse
+	if resp.StatusCode == 200 {
+		fmt.Println(fmt.Sprintf("Tag: '%v' was created successfully.\n", tag))
+	} else {
+		fmt.Println(fmt.Sprintf("Something went wrong when attempting to add tag: '%v'\n", tag))
+	}
+}
+
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Printf("usage: %v <filename>\n", filepath.Base(os.Args[0]))
@@ -96,59 +128,54 @@ func main() {
 	envBytes := readEnvFile()
 
 	// Get API Key
-	apiKey := getAPIKey(envBytes)
-	fmt.Println(apiKey)
+	apiKey = getAPIKey(envBytes)
 
 	// Get list of PANs
 	pFWs := getPANs(envBytes)
 
 	// Get tags from provided file
 	tags := getTags(os.Args[1])
-	for _, i := range tags {
-		fmt.Println(i)
+
+	for _, pan := range pFWs {
+		for _, tag := range tags {
+			createTag(tag, pan)
+		}
 	}
 
-	//------------------
-	url := fmt.Sprintf("https://%v/api/?key=%v&%v", pFWs[0], apiKey, tagXPath)
-	fmt.Println(url)
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	client := http.Client{Transport: tr}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	b, err := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	fmt.Println(string(b))
-
-	re := regexp.MustCompile(`entry name="(.+?)"`)
-	r := re.FindAllStringSubmatch(string(b), -1)
-	if len(r) == 0 {
-		fmt.Println("No matches found, exiting..")
-		os.Exit(1)
-	}
-	for _, i := range r {
-		fmt.Println(i[1])
-	}
-
-	// var t Tags
-	// err = xml.Unmarshal(b, &t)
+	// ------------------
+	// GET
+	// ------------------
+	// url := fmt.Sprintf("https://%v/api/?key=%v&%v", pFWs[0], apiKey, getXPath)
+	// fmt.Println(url)
+	// tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// client := http.Client{Transport: tr}
+	// req, err := http.NewRequest("GET", url, nil)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	os.Exit(1)
+	// }
+	// resp, err := client.Do(req)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	os.Exit(1)
+	// }
+	// b, err := ioutil.ReadAll(resp.Body)
+	// resp.Body.Close()
 	// if err != nil {
 	// 	fmt.Println(err)
 	// 	os.Exit(1)
 	// }
 
-	// fmt.Println(t)
+	// fmt.Println(string(b))
+
+	// re := regexp.MustCompile(`entry name="(.+?)"`)
+	// r := re.FindAllStringSubmatch(string(b), -1)
+	// if len(r) == 0 {
+	// 	fmt.Println("No matches found, exiting..")
+	// 	os.Exit(1)
+	// }
+	// for _, i := range r {
+	// 	fmt.Println(i[1])
+	// }
 
 }
