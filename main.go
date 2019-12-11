@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -33,14 +32,8 @@ func readEnvFile() []byte {
 	}
 	// Get base directory of program
 	base := filepath.Dir(abs)
-	switch runtime.GOOS {
-	case "linux", "darwin", "freebsd":
-		base = base + "/"
-	case "windows":
-		base = base + "\\"
-	}
 	// Read env file
-	envBytes, err := ioutil.ReadFile(base + envFile)
+	envBytes, err := ioutil.ReadFile(filepath.Join(base, envFile))
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
