@@ -14,11 +14,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 const envFile = ".env" // Environment file
 
-var apiKey string // For storing API key
+var (
+	wg     sync.WaitGroup
+	apiKey string // For storing API key
+)
 
 func readEnvFile() []byte {
 	// Get absoulute path of program
@@ -111,7 +115,7 @@ func createTag(tag, pan string) bool {
 		}
 		// Read reponse
 		if resp.StatusCode == 200 {
-			fmt.Println(fmt.Sprintf("Tag:'%v' was created successfully.", tag))
+			fmt.Println(fmt.Sprintf("Tag:'%v' was successfully created.", tag))
 			return true
 		}
 		fmt.Println(fmt.Sprintf("Something went wrong when attempting to add tag:'%v'", tag))
@@ -121,7 +125,38 @@ func createTag(tag, pan string) bool {
 	return false
 }
 
+func commitChanges(pan string) {
+	commitXPath := "type=commit"
+	// Generate encoded query string
+	encodedQuery := url.QueryEscape("<commit><description>New tags added - saving changes.</description></commit>")
+	encodedQuery = strings.Replace(encodedQuery, "%26", "%26amp;", -1)
+	// URL
+	url := fmt.Sprintf("https://%v/api/?key=%v&%v&cmd=%v", pan, apiKey, commitXPath, encodedQuery)
+	// Create HTTP transport
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// Create HTTP client
+	client := http.Client{Transport: tr}
+	// Generate GET request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	// Execute request
+	fmt.Printf("Committing changes on %v..\n", pan)
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Failed to commit changes on %v: %v\n", pan, err)
+	}
+	if resp.StatusCode == 200 {
+		fmt.Printf("Changes committed successfully on %v\n", pan)
+		return
+	}
+	fmt.Printf("Something went wrong when attempting to commit changes on:'%v'\n", pan)
+}
+
 func main() {
+	// Check if tag file was provided
 	if len(os.Args) != 2 {
 		fmt.Printf("usage: %v <filename>\n", filepath.Base(os.Args[0]))
 		os.Exit(1)
@@ -138,15 +173,26 @@ func main() {
 	// Get tags from provided file
 	tags := getTags(os.Args[1])
 
-OUTER:
 	for _, pan := range pFWs {
-		for _, tag := range tags {
-			result := createTag(tag, pan)
-			if !result { // If creation of tag fails on PAN devices, move onto next PAN device
-				continue OUTER
+		wg.Add(1)
+		go func(pan string) {
+			count := 0 // For keeping count on how many tags were created
+			for _, tag := range tags {
+				ok := createTag(tag, pan)
+				if !ok { // Return if creation of tag failed on PAN device
+					break
+				} else {
+					count++ // Add to counter since tag was created successfully
+				}
 			}
-		}
-		// Commit changes
+			// Commit changes on current PAN device if at least 1 tag was successfully created
+			if count > 0 {
+				commitChanges(pan)
+			}
+			wg.Done()
+		}(pan)
 
 	}
+	wg.Wait() // Wait for all PAN devices to finish
+	fmt.Println("Tag processing completed, exiting..")
 }
