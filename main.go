@@ -54,6 +54,13 @@ func getAPIKey(e []byte) string {
 	return re.FindStringSubmatch(string(e))[1]
 }
 
+func createClient() *http.Client {
+	// Create HTTP transport
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// Create HTTP client
+	return &http.Client{Transport: tr}
+}
+
 func getTags(fn string) []string {
 	f, err := os.Open(fn)
 	if err != nil {
@@ -82,17 +89,13 @@ func getPANs(e []byte) []string {
 	return strings.Split(reResults[1], ",")
 }
 
-func createTag(tag, pan string) bool {
+func createTag(tag, pan string, c *http.Client) bool {
 	tagSetXPath := "type=config&action=set&xpath=/config/shared/tag"
 	// Generate encoded query string
 	encodedQuery := url.QueryEscape(fmt.Sprintf("<entry name='%v'/>", tag))
 	encodedQuery = strings.Replace(encodedQuery, "%26", "%26amp;", -1)
 	// URL
 	url := fmt.Sprintf("https://%v/api/?key=%v&%v&element=%v", pan, apiKey, tagSetXPath, encodedQuery)
-	// Create HTTP transport
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	// Create HTTP client
-	client := http.Client{Transport: tr}
 	// Generate GET request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -103,7 +106,7 @@ func createTag(tag, pan string) bool {
 	fmt.Printf("Attempting to create tag '%v' on %v..\n", tag, pan)
 	counter := 1
 	for counter <= 3 { // # of retries before confirming no connectivity
-		resp, err := client.Do(req)
+		resp, err := c.Do(req)
 		if err != nil {
 			counter++
 			if counter > 3 {
@@ -125,17 +128,13 @@ func createTag(tag, pan string) bool {
 	return false
 }
 
-func commitChanges(pan string) {
+func commitChanges(pan string, c *http.Client) {
 	commitXPath := "type=commit"
 	// Generate encoded query string
 	encodedQuery := url.QueryEscape("<commit><description>New tags added - saving changes.</description></commit>")
 	encodedQuery = strings.Replace(encodedQuery, "%26", "%26amp;", -1)
 	// URL
 	url := fmt.Sprintf("https://%v/api/?key=%v&%v&cmd=%v", pan, apiKey, commitXPath, encodedQuery)
-	// Create HTTP transport
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	// Create HTTP client
-	client := http.Client{Transport: tr}
 	// Generate GET request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -144,7 +143,7 @@ func commitChanges(pan string) {
 	}
 	// Execute request
 	fmt.Printf("Committing changes on %v..\n", pan)
-	resp, err := client.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		fmt.Printf("Failed to commit changes on %v: %v\n", pan, err)
 	}
@@ -173,12 +172,16 @@ func main() {
 	// Get tags from provided file
 	tags := getTags(os.Args[1])
 
+	// Create HTTPS client
+	client := createClient()
+
 	for _, pan := range pFWs {
 		wg.Add(1)
 		go func(pan string) {
+			defer wg.Done()
 			count := 0 // For keeping count on how many tags were created
 			for _, tag := range tags {
-				ok := createTag(tag, pan)
+				ok := createTag(tag, pan, client)
 				if !ok { // Return if creation of tag failed on PAN device
 					break
 				} else {
@@ -187,9 +190,8 @@ func main() {
 			}
 			// Commit changes on current PAN device if at least 1 tag was successfully created
 			if count > 0 {
-				commitChanges(pan)
+				commitChanges(pan, client)
 			}
-			wg.Done()
 		}(pan)
 
 	}
