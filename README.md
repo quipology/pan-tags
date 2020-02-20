@@ -18,3 +18,6 @@ This tool will create tags against PANOS (tested on PANOS v8.1).
 
 ## Authors 
 - Bobby Williams <https://www.linkedin.com/in/bobby-williams-48222450/>
+
+## License
+[MIT](LICENSE.md)
